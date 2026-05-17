@@ -3,7 +3,10 @@ use tracing::debug;
 
 // Parse output of wsl -l -v command to extract WSL subsystem list
 pub fn parse_distros_list(output: &str) -> Vec<WslDistro> {
-    debug!("Parsing WSL distributions list from output (length: {})", output.len());
+    debug!(
+        "Parsing WSL distributions list from output (length: {})",
+        output.len()
+    );
     let mut distros = Vec::new();
     let lines = output.lines();
 
@@ -34,9 +37,9 @@ pub fn parse_distros_list(output: &str) -> Vec<WslDistro> {
         }
 
         // Handle case where name contains spaces (though WSL subsystem names usually don't)
-        let name_parts = parts[0..parts.len()-2].join(" ");
-        let state_part = parts[parts.len()-2];
-        let version_part = parts[parts.len()-1];
+        let name_parts = parts[0..parts.len() - 2].join(" ");
+        let state_part = parts[parts.len() - 2];
+        let version_part = parts[parts.len() - 1];
 
         // Parse status
         let status = match state_part.to_lowercase().as_str() {
@@ -52,8 +55,8 @@ pub fn parse_distros_list(output: &str) -> Vec<WslDistro> {
         };
 
         // Check if it's the default subsystem (default subsystem has * before name)
-        let (is_default, name) = if name_parts.starts_with("*") {
-            (true, name_parts[1..].trim().to_string())
+        let (is_default, name) = if let Some(stripped) = name_parts.strip_prefix("*") {
+            (true, stripped.trim().to_string())
         } else {
             (false, name_parts.trim().to_string())
         };

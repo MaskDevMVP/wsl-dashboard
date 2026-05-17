@@ -1,12 +1,12 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use std::collections::HashMap;
 use tokio::sync::{Mutex, Notify};
 use tokio::time::Duration;
 use tracing::debug;
 
 use crate::wsl::command::WslCommandExecutor;
-use crate::wsl::models::{WslDistro, WslCommandResult, WslStatus};
+use crate::wsl::models::{WslCommandResult, WslDistro, WslStatus};
 
 // WSL state manager, responsible for managing and monitoring the status of WSL subsystems
 #[derive(Clone)]
@@ -45,7 +45,7 @@ impl WslDashboard {
     }
 
     pub fn heavy_op_lock(&self) -> &Mutex<()> {
-        &*self.heavy_op_lock
+        &self.heavy_op_lock
     }
 
     #[allow(dead_code)]
@@ -103,28 +103,28 @@ impl WslDashboard {
         // }
 
         let result = self.executor.list_distros().await;
-        if result.success {
-            if let Some(distros) = result.data.clone() {
-                let mut distros_lock = self.distros.lock().await;
-                let old_distros = distros_lock.clone();
-                *distros_lock = distros.clone();
-                
-                let mut has_changes = false;
-                if old_distros.len() != distros.len() {
-                    has_changes = true;
-                } else {
-                    for (old, new) in old_distros.iter().zip(distros.iter()) {
-                        if !old.business_equals(new) {
-                            has_changes = true;
-                            break;
-                        }
+        if result.success
+            && let Some(distros) = result.data.clone()
+        {
+            let mut distros_lock = self.distros.lock().await;
+            let old_distros = distros_lock.clone();
+            *distros_lock = distros.clone();
+
+            let mut has_changes = false;
+            if old_distros.len() != distros.len() {
+                has_changes = true;
+            } else {
+                for (old, new) in old_distros.iter().zip(distros.iter()) {
+                    if !old.business_equals(new) {
+                        has_changes = true;
+                        break;
                     }
                 }
-                
-                if has_changes {
-                    tracing::debug!("WSL distribution list changed, notifying UI update");
-                    self.state_changed.notify_one();
-                }
+            }
+
+            if has_changes {
+                tracing::debug!("WSL distribution list changed, notifying UI update");
+                self.state_changed.notify_one();
             }
         }
         result
@@ -189,5 +189,5 @@ impl Default for WslDashboard {
     }
 }
 
-mod ops;
 pub mod operation_guard;
+mod ops;

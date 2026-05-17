@@ -1,23 +1,39 @@
+use super::{generate_random_suffix, sanitize_instance_name};
+use crate::ui::data::refresh_distros_ui;
+use crate::{AppState, AppWindow, i18n};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use std::path::PathBuf;
-use tracing::{info, error};
-use crate::{AppState, AppWindow, i18n};
-use crate::ui::data::refresh_distros_ui;
-use super::{sanitize_instance_name, generate_random_suffix};
+use tracing::{error, info};
+
+#[derive(Clone)]
+pub struct InstallConfig {
+    pub source_idx: i32,
+    pub name: String,
+    pub friendly_name: String,
+    pub internal_id: String,
+    pub install_path: String,
+    pub file_path: String,
+}
 
 pub async fn perform_install(
     ah: slint::Weak<AppWindow>,
     as_ptr: Arc<Mutex<AppState>>,
-    source_idx: i32,
-    name: String,
-    friendly_name: String,
-    internal_id: String,
-    install_path: String,
-    file_path: String,
+    config: InstallConfig,
 ) {
-    info!("perform_install started: source={}, name={}, friendly={}, internal_id={}, path={}", 
-          source_idx, name, friendly_name, internal_id, install_path);
+    let InstallConfig {
+        source_idx,
+        name,
+        friendly_name,
+        internal_id,
+        install_path,
+        file_path,
+    } = config;
+
+    info!(
+        "perform_install started: source={}, name={}, friendly={}, internal_id={}, path={}",
+        source_idx, name, friendly_name, internal_id, install_path
+    );
 
     // Guard against UI thread blocks - yield initially
     tokio::task::yield_now().await;
@@ -29,8 +45,13 @@ pub async fn perform_install(
             Ok(state) => {
                 // Get a snapshot of distros for conflict check (using async to avoid deadlock)
                 let distros = state.wsl_dashboard.get_distros().await;
-                (Arc::new(state.wsl_dashboard.clone()), state.wsl_dashboard.executor().clone(), state.config_manager.clone(), distros)
-            },
+                (
+                    Arc::new(state.wsl_dashboard.clone()),
+                    state.wsl_dashboard.executor().clone(),
+                    state.config_manager.clone(),
+                    distros,
+                )
+            }
             Err(_) => {
                 error!("perform_install: Failed to acquire AppState lock within 3s");
                 let ah_err = ah.clone();
@@ -38,14 +59,17 @@ pub async fn perform_install(
                     if let Some(app) = ah_err.upgrade() {
                         let app_typed: AppWindow = app;
                         app_typed.set_install_status(i18n::t("install.error").into());
-                        app_typed.set_terminal_output("Error: System is busy (AppState lock timeout). Please try again.".into());
+                        app_typed.set_terminal_output(
+                            "Error: System is busy (AppState lock timeout). Please try again."
+                                .into(),
+                        );
                     }
                 });
                 return;
             }
         }
     };
-    
+
     dashboard.increment_manual_operation();
     let dashboard_cleanup = dashboard.clone();
     let _manual_op_guard = scopeguard::guard(dashboard_cleanup, |db| {
@@ -87,10 +111,10 @@ pub async fn perform_install(
     if final_name.is_empty() {
         if source_idx == 2 {
             final_name = friendly_name.clone();
-        } else if !file_path.is_empty() {
-            if let Some(stem) = std::path::Path::new(&file_path).file_stem() {
-                final_name = stem.to_string_lossy().to_string();
-            }
+        } else if !file_path.is_empty()
+            && let Some(stem) = std::path::Path::new(&file_path).file_stem()
+        {
+            final_name = stem.to_string_lossy().to_string();
         }
     }
 
@@ -107,7 +131,9 @@ pub async fn perform_install(
         return;
     }
 
-    let is_valid_chars = final_name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.');
+    let is_valid_chars = final_name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.');
     if !is_valid_chars || final_name.len() > 25 {
         let ah_err = ah.clone();
         let _ = slint::invoke_from_event_loop(move || {
@@ -128,10 +154,10 @@ pub async fn perform_install(
         let ah_err = ah.clone();
         let mut distro_location = String::new();
         if let Some(app) = ah_err.upgrade() {
-             let app_typed: AppWindow = app;
+            let app_typed: AppWindow = app;
             distro_location = app_typed.get_distro_location().to_string();
         }
-        
+
         let new_path = std::path::Path::new(&distro_location)
             .join(&new_suggested_name)
             .to_string_lossy()
@@ -143,7 +169,9 @@ pub async fn perform_install(
                 let app_typed: AppWindow = app;
                 app_typed.set_new_instance_name(new_suggested_name.into());
                 app_typed.set_new_instance_path(new_path.into());
-                app_typed.set_name_error(i18n::tr("dialog.install_name_exists", &[final_name_clone]).into());
+                app_typed.set_name_error(
+                    i18n::tr("dialog.install_name_exists", &[final_name_clone]).into(),
+                );
                 app_typed.set_is_installing(false);
                 app_typed.set_install_status(i18n::t("install.conflict_error").into());
             }
@@ -156,7 +184,8 @@ pub async fn perform_install(
 
     // 4. Source-specific installation logic
     match source_idx {
-        2 => { // Store Source
+        2 => {
+            // Store Source
             let real_id = if !internal_id.is_empty() {
                 internal_id.clone()
             } else {
@@ -182,12 +211,20 @@ pub async fn perform_install(
                 if let Some(app) = ah_status.upgrade() {
                     let app_typed: AppWindow = app;
                     app_typed.set_install_status(i18n::t("install.installing").into());
-                    app_typed.set_terminal_output(format!("{}\n", i18n::tr("install.step_1", &[real_id_clone])).into());
+                    app_typed.set_terminal_output(
+                        format!("{}\n", i18n::tr("install.step_1", &[real_id_clone])).into(),
+                    );
                 }
             });
-            let mut terminal_buffer = format!("{}\n", i18n::tr("install.step_1", &[real_id.clone()]));
-            info!("Starting store installation for distribution ID: {}", real_id);
-            
+            let mut terminal_buffer = format!(
+                "{}\n",
+                i18n::tr("install.step_1", std::slice::from_ref(&real_id))
+            );
+            info!(
+                "Starting store installation for distribution ID: {}",
+                real_id
+            );
+
             // Check if real_id already exists in WSL to prevent accidental data loss
             if distro_snapshot.iter().any(|d| d.name == real_id) {
                 let ah_err = ah.clone();
@@ -195,7 +232,9 @@ pub async fn perform_install(
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(app) = ah_err.upgrade() {
                         let app_typed: AppWindow = app;
-                        app_typed.set_name_error(i18n::tr("install.real_id_conflict", &[real_id_err]).into());
+                        app_typed.set_name_error(
+                            i18n::tr("install.real_id_conflict", &[real_id_err]).into(),
+                        );
                         app_typed.set_is_installing(false);
                         app_typed.set_install_status(i18n::t("install.conflict_error").into());
                     }
@@ -205,30 +244,37 @@ pub async fn perform_install(
 
             // Cleanup existing if any
             let _ = executor.delete_distro(&config_manager, &real_id).await;
-            
+
             terminal_buffer.push_str(&format!("{}\n", i18n::t("install.step_2")));
             let ah_cb = ah.clone();
             let tb_clone = terminal_buffer.clone();
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(app) = ah_cb.upgrade() {
-                     let app_typed: AppWindow = app;
+                    let app_typed: AppWindow = app;
                     app_typed.set_terminal_output(tb_clone.into());
                 }
             });
 
             // Detect fastest source can involve network calls
             let use_web_download = executor.detect_fastest_source().await;
-            
+
             let mut install_args = vec!["--install", "-d", &real_id, "--no-launch"];
             if use_web_download {
                 install_args.push("--web-download");
             }
             let cmd_str = format!("wsl {}", install_args.join(" "));
-            
-            terminal_buffer.push_str(&format!("{}\n", i18n::tr("install.step_3", &[cmd_str.clone()])));
-            let source_text = if use_web_download { "GitHub" } else { "Microsoft" };
-            terminal_buffer.push_str(&i18n::tr("install.step_4", &[source_text.to_string()])); 
-            
+
+            terminal_buffer.push_str(&format!(
+                "{}\n",
+                i18n::tr("install.step_3", std::slice::from_ref(&cmd_str))
+            ));
+            let source_text = if use_web_download {
+                "GitHub"
+            } else {
+                "Microsoft"
+            };
+            terminal_buffer.push_str(&i18n::tr("install.step_4", &[source_text.to_string()]));
+
             let ah_cb = ah.clone();
             let tb_clone = terminal_buffer.clone();
             let _ = slint::invoke_from_event_loop(move || {
@@ -241,7 +287,7 @@ pub async fn perform_install(
             info!("Installing from source: {}", source_text);
 
             let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(100);
-            
+
             // Channel-based UI update task to throttle updates and prevent freezing
             let ah_ui = ah.clone();
             let initial_tb = terminal_buffer.clone();
@@ -249,7 +295,7 @@ pub async fn perform_install(
                 let mut buffer = initial_tb;
                 let mut dot_count = 0;
                 let mut interval = tokio::time::interval(std::time::Duration::from_millis(800));
-                
+
                 loop {
                     tokio::select! {
                         msg = rx.recv() => {
@@ -265,7 +311,7 @@ pub async fn perform_install(
                                 let mut dots = String::new();
                                 for _ in 0..dot_count { dots.push('.'); }
                                 let text_to_set = format!("{}{}", buffer, dots);
-                                
+
                                 let ah_cb = ah_ui.clone();
                                 let _ = slint::invoke_from_event_loop(move || {
                                     if let Some(app) = ah_cb.upgrade() {
@@ -285,12 +331,12 @@ pub async fn perform_install(
                         }
                     }
 
-                     // Throttled UI update removed to prevent overwriting dots animation 
-                     // since all WSL output is hidden in this phase.
+                    // Throttled UI update removed to prevent overwriting dots animation
+                    // since all WSL output is hidden in this phase.
                 }
-                
+
                 // No final flush needed since we are hiding all WSL output
-                
+
                 let ah_final = ah_ui.clone();
                 let text_to_set = buffer.clone();
                 let _ = slint::invoke_from_event_loop(move || {
@@ -302,19 +348,21 @@ pub async fn perform_install(
                 buffer
             });
 
-             info!("Waiting for WSL installation to complete...");
+            info!("Waiting for WSL installation to complete...");
             let tx_callback = tx.clone();
-            let result = executor.execute_command_streaming(&install_args, move |text| {
-                let _ = tx_callback.try_send(text);
-            }).await;
-            
+            let result = executor
+                .execute_command_streaming(&install_args, move |text| {
+                    let _ = tx_callback.try_send(text);
+                })
+                .await;
+
             drop(tx);
             terminal_buffer = ui_task.await.unwrap_or(terminal_buffer);
             // Don't add newline yet, verification will keep dots rolling
             if !terminal_buffer.ends_with('.') && !terminal_buffer.ends_with('\n') {
-                terminal_buffer.push_str("."); // Start with one dot to bridge the gap
+                terminal_buffer.push('.'); // Start with one dot to bridge the gap
             }
-            
+
             let ah_res = ah.clone();
             let tb_clone = terminal_buffer.clone();
             let _ = slint::invoke_from_event_loop(move || {
@@ -336,37 +384,39 @@ pub async fn perform_install(
 
                 let mut verify_dot_count = 1;
                 for _ in 0..15 {
-                     dashboard.refresh_distros().await;
-                     
-                     let distros_final = dashboard.get_distros().await;
-                     if distros_final.iter().any(|d| d.name == real_id) {
-                         distro_registered = true;
-                         break;
-                     }
-                     
-                     // Keep dots rolling even during verification (2s sleep -> small steps)
-                     for _ in 0..3 {
-                         tokio::time::sleep(std::time::Duration::from_millis(666)).await;
-                         verify_dot_count = (verify_dot_count % 3) + 1;
-                         let mut dots = String::new();
-                         for _ in 0..verify_dot_count { dots.push('.'); }
-                         let text_to_set = format!("{}{}", terminal_buffer, dots);
-                         
-                         let ah_v = ah.clone();
-                         let _ = slint::invoke_from_event_loop(move || {
-                             if let Some(app) = ah_v.upgrade() {
-                                 app.set_terminal_output(text_to_set.into());
-                             }
-                         });
-                     }
+                    dashboard.refresh_distros().await;
+
+                    let distros_final = dashboard.get_distros().await;
+                    if distros_final.iter().any(|d| d.name == real_id) {
+                        distro_registered = true;
+                        break;
+                    }
+
+                    // Keep dots rolling even during verification (2s sleep -> small steps)
+                    for _ in 0..3 {
+                        tokio::time::sleep(std::time::Duration::from_millis(666)).await;
+                        verify_dot_count = (verify_dot_count % 3) + 1;
+                        let mut dots = String::new();
+                        for _ in 0..verify_dot_count {
+                            dots.push('.');
+                        }
+                        let text_to_set = format!("{}{}", terminal_buffer, dots);
+
+                        let ah_v = ah.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(app) = ah_v.upgrade() {
+                                app.set_terminal_output(text_to_set.into());
+                            }
+                        });
+                    }
                 }
-                
+
                 // Final dots and newline before next step
                 terminal_buffer.push_str("...");
                 terminal_buffer.push('\n');
 
                 if !distro_registered {
-                     error_msg = i18n::tr("install.verify_failed", &[real_id.clone()]);
+                    error_msg = i18n::tr("install.verify_failed", std::slice::from_ref(&real_id));
                 } else {
                     terminal_buffer.push_str(&format!("{}\n", i18n::t("install.step_5")));
                     let ah_cb = ah.clone();
@@ -379,38 +429,43 @@ pub async fn perform_install(
                     });
 
                     if final_name != real_id || !install_path.is_empty() {
-                         info!("Relocating distribution to {}...", install_path);
-                         let ah_cb = ah.clone();
-                         let _ = slint::invoke_from_event_loop(move || {
+                        info!("Relocating distribution to {}...", install_path);
+                        let ah_cb = ah.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
                             if let Some(app) = ah_cb.upgrade() {
                                 let app_typed: AppWindow = app;
                                 app_typed.set_install_status(i18n::t("install.customizing").into());
                             }
-                         });
-                         
-                         terminal_buffer.push_str(&format!("{}\n", i18n::t("install.step_6")));
-                         let ah_cb = ah.clone();
-                         let tb_clone = terminal_buffer.clone();
-                         let _ = slint::invoke_from_event_loop(move || {
+                        });
+
+                        terminal_buffer.push_str(&format!("{}\n", i18n::t("install.step_6")));
+                        let ah_cb = ah.clone();
+                        let tb_clone = terminal_buffer.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
                             if let Some(app) = ah_cb.upgrade() {
                                 let app_typed: AppWindow = app;
                                 app_typed.set_terminal_output(tb_clone.into());
                             }
-                         });
+                        });
 
                         let (temp_dir, temp_file_str) = {
                             let temp_location = config_manager.get_settings().temp_location.clone();
                             let temp_dir = PathBuf::from(temp_location);
-                            let temp_file = temp_dir.join(format!("wsl_move_{}.tar", uuid::Uuid::new_v4()));
+                            let temp_file =
+                                temp_dir.join(format!("wsl_move_{}.tar", uuid::Uuid::new_v4()));
                             (temp_dir, temp_file.to_string_lossy().to_string())
                         };
-                        
-                        let _ = tokio::task::spawn_blocking(move || std::fs::create_dir_all(&temp_dir)).await;
+
+                        let _ =
+                            tokio::task::spawn_blocking(move || std::fs::create_dir_all(&temp_dir))
+                                .await;
                         let target_path = install_path.clone();
 
                         tokio::task::yield_now().await;
-                        executor.execute_command(&["--export", &real_id, &temp_file_str]).await;
-                        
+                        executor
+                            .execute_command(&["--export", &real_id, &temp_file_str])
+                            .await;
+
                         tokio::task::yield_now().await;
                         terminal_buffer.push_str(&format!("{}\n", i18n::t("install.step_7")));
                         let ah_cb = ah.clone();
@@ -424,36 +479,50 @@ pub async fn perform_install(
 
                         tokio::task::yield_now().await;
                         executor.execute_command(&["--unregister", &real_id]).await;
-                        
+
                         let final_path = if target_path.is_empty() {
-                            let distro_location = config_manager.get_settings().distro_location.clone();
+                            let distro_location =
+                                config_manager.get_settings().distro_location.clone();
                             let base = PathBuf::from(&distro_location);
                             base.join(&final_name).to_string_lossy().to_string()
                         } else {
                             target_path
                         };
-                        
+
                         let fp_clone = final_path.clone();
-                        let _ = tokio::task::spawn_blocking(move || std::fs::create_dir_all(&fp_clone)).await;
-                        
+                        let _ =
+                            tokio::task::spawn_blocking(move || std::fs::create_dir_all(&fp_clone))
+                                .await;
+
                         tokio::task::yield_now().await;
-                        let import_res = executor.execute_command(&["--import", &final_name, &final_path, &temp_file_str]).await;
-                        
+                        let import_res = executor
+                            .execute_command(&[
+                                "--import",
+                                &final_name,
+                                &final_path,
+                                &temp_file_str,
+                            ])
+                            .await;
+
                         let tf_clone = temp_file_str.clone();
-                        let _ = tokio::task::spawn_blocking(move || std::fs::remove_file(&tf_clone)).await;
-                        
+                        let _ =
+                            tokio::task::spawn_blocking(move || std::fs::remove_file(&tf_clone))
+                                .await;
+
                         success = import_res.success;
                         if success {
                             terminal_buffer.push_str(&format!("{}\n", i18n::t("install.step_8")));
                             terminal_buffer.push_str(&format!("{}\n", i18n::t("install.step_9")));
                         } else {
-                            error_msg = import_res.error.unwrap_or_else(|| i18n::t("install.import_failed_custom"));
+                            error_msg = import_res
+                                .error
+                                .unwrap_or_else(|| i18n::t("install.import_failed_custom"));
                         }
                     } else {
                         success = true;
                         terminal_buffer.push_str(&format!("{}\n", i18n::t("install.step_9")));
                     }
-                    
+
                     let ah_cb = ah.clone();
                     let tb_clone = terminal_buffer.clone();
                     let _ = slint::invoke_from_event_loop(move || {
@@ -465,9 +534,11 @@ pub async fn perform_install(
                 }
             } else {
                 if !result.output.trim().is_empty() {
-                     terminal_buffer.push_str(&format!("\n[WSL Output]\n{}\n", result.output));
+                    terminal_buffer.push_str(&format!("\n[WSL Output]\n{}\n", result.output));
                 }
-                error_msg = result.error.unwrap_or_else(|| i18n::t("install.install_failed"));
+                error_msg = result
+                    .error
+                    .unwrap_or_else(|| i18n::t("install.install_failed"));
                 let ah_cb = ah.clone();
                 let tb_clone = terminal_buffer.clone();
                 let _ = slint::invoke_from_event_loop(move || {
@@ -477,8 +548,9 @@ pub async fn perform_install(
                     }
                 });
             }
-        },
-        0 | 1 => { // RootFS or VHDX Import
+        }
+        0 | 1 => {
+            // RootFS or VHDX Import
             if file_path.is_empty() {
                 error_msg = i18n::t("install.select_file");
             } else {
@@ -491,23 +563,29 @@ pub async fn perform_install(
                         app_typed.set_terminal_output(tb_clone.into());
                     }
                 });
-                
+
                 let mut target_path = install_path.clone();
                 if target_path.is_empty() {
                     let distro_location = config_manager.get_settings().distro_location.clone();
                     let base = PathBuf::from(&distro_location);
                     target_path = base.join(&final_name).to_string_lossy().to_string();
                 }
-                
+
                 let tp_clone = target_path.clone();
-                if let Err(e) = tokio::task::spawn_blocking(move || std::fs::create_dir_all(&tp_clone)).await.unwrap() {
+                if let Err(e) =
+                    tokio::task::spawn_blocking(move || std::fs::create_dir_all(&tp_clone))
+                        .await
+                        .unwrap()
+                {
                     let err = format!("Failed to create directory: {}", e);
                     let ah_cb = ah.clone();
                     let _ = slint::invoke_from_event_loop(move || {
                         if let Some(app) = ah_cb.upgrade() {
                             let app_typed: AppWindow = app;
                             app_typed.set_install_success(false);
-                            app_typed.set_install_status(format!("{}: {}", i18n::t("install.error"), err).into());
+                            app_typed.set_install_status(
+                                format!("{}: {}", i18n::t("install.error"), err).into(),
+                            );
                             app_typed.set_is_installing(false);
                         }
                     });
@@ -526,9 +604,12 @@ pub async fn perform_install(
                 if source_idx == 1 {
                     import_args.push("--vhd");
                 }
-                
+
                 let cmd_str = format!("wsl {}", import_args.join(" "));
-                terminal_buffer.push_str(&i18n::tr("install.step_2_3", &[cmd_str.clone()]));
+                terminal_buffer.push_str(&i18n::tr(
+                    "install.step_2_3",
+                    std::slice::from_ref(&cmd_str),
+                ));
                 let ah_cb = ah.clone();
                 let tb_clone = terminal_buffer.clone();
                 let _ = slint::invoke_from_event_loop(move || {
@@ -545,7 +626,7 @@ pub async fn perform_install(
                     let mut buffer = initial_tb;
                     let mut dot_count = 0;
                     let mut interval = tokio::time::interval(std::time::Duration::from_millis(800));
-                    
+
                     loop {
                         tokio::select! {
                             msg = rx.recv() => {
@@ -560,7 +641,7 @@ pub async fn perform_install(
                                      let mut dots = String::new();
                                      for _ in 0..dot_count { dots.push('.'); }
                                      let text_to_set = format!("{}{}", buffer, dots);
-                                     
+
                                      let ah_cb = ah_ui.clone();
                                      let _ = slint::invoke_from_event_loop(move || {
                                          if let Some(app) = ah_cb.upgrade() {
@@ -579,7 +660,7 @@ pub async fn perform_install(
                                 buffer.drain(..to_drain);
                             }
                         }
-                         // Throttled UI update removed to prevent overwriting dots animation
+                        // Throttled UI update removed to prevent overwriting dots animation
                     }
                     if !buffer.ends_with('\n') {
                         buffer.push('\n');
@@ -596,23 +677,30 @@ pub async fn perform_install(
                 });
 
                 let tx_callback = tx.clone();
-                let result = executor.execute_command_streaming(&import_args, move |text| {
-                    let _ = tx_callback.try_send(text);
-                }).await;
+                let result = executor
+                    .execute_command_streaming(&import_args, move |text| {
+                        let _ = tx_callback.try_send(text);
+                    })
+                    .await;
 
                 drop(tx);
                 terminal_buffer = ui_task.await.unwrap_or(terminal_buffer);
 
                 success = result.success;
                 if !success {
-                     if !result.output.trim().is_empty() {
-                         terminal_buffer.push_str(&format!("\n[WSL Output]\n{}\n", result.output));
+                    if !result.output.trim().is_empty() {
+                        terminal_buffer.push_str(&format!("\n[WSL Output]\n{}\n", result.output));
                     }
-                    error_msg = result.error.unwrap_or_else(|| i18n::t("install.import_failed"));
+                    error_msg = result
+                        .error
+                        .unwrap_or_else(|| i18n::t("install.import_failed"));
                 } else {
-                    terminal_buffer.push_str(&format!("{}\n", i18n::tr("install.step_3_3", &[final_name.clone()])));
+                    terminal_buffer.push_str(&format!(
+                        "{}\n",
+                        i18n::tr("install.step_3_3", &[final_name.clone()])
+                    ));
                 }
-                
+
                 let ah_cb = ah.clone();
                 let tb_clone = terminal_buffer.clone();
                 let _ = slint::invoke_from_event_loop(move || {
@@ -622,7 +710,7 @@ pub async fn perform_install(
                     }
                 });
             }
-        },
+        }
         _ => {
             error_msg = i18n::t("install.unknown_source");
         }
@@ -636,15 +724,19 @@ pub async fn perform_install(
             let app_typed: AppWindow = app;
             if success {
                 app_typed.set_install_success(true);
-                app_typed.set_install_status(i18n::tr("install.created_success", &[final_name_clone]).into());
+                app_typed.set_install_status(
+                    i18n::tr("install.created_success", &[final_name_clone]).into(),
+                );
             } else {
                 app_typed.set_install_success(false);
-                app_typed.set_install_status(format!("{}: {}", i18n::t("install.error"), error_msg_clone).into());
+                app_typed.set_install_status(
+                    format!("{}: {}", i18n::t("install.error"), error_msg_clone).into(),
+                );
             }
             app_typed.set_is_installing(false);
         }
     });
-    
+
     if success {
         refresh_distros_ui(ah.clone(), as_ptr.clone()).await;
     }

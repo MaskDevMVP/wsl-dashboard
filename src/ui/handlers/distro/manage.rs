@@ -1,10 +1,10 @@
+use crate::ui::data::refresh_distros_ui;
+use crate::ui::handlers::instance;
+use crate::{AppState, AppWindow, i18n};
+use slint::Model;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
-use slint::Model;
-use crate::{AppWindow, AppState, i18n};
-use crate::ui::data::refresh_distros_ui;
-use crate::ui::handlers::instance;
 
 pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc<Mutex<AppState>>) {
     // Handle message link click
@@ -16,7 +16,7 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
                 if link.is_empty() {
                     link = app.get_current_message_link().to_string();
                 }
-                
+
                 if link.starts_with("http://") || link.starts_with("https://") {
                     let _ = open::that(link);
                 } else {
@@ -56,8 +56,6 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
                     return;
                 }
 
-
-
                 {
                     let lock_timeout = std::time::Duration::from_millis(500);
                     if let Ok(app_state) = tokio::time::timeout(lock_timeout, as_ptr.lock()).await {
@@ -65,29 +63,43 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
                         let instance_config = app_state.config_manager.get_instance_config(&name);
                         let working_dir = instance_config.terminal_dir.clone();
                         let terminal_proxy_enabled = instance_config.terminal_proxy;
-                        let proxy_config = app_state.config_manager.get_network_config().proxy.clone();
+                        let proxy_config =
+                            app_state.config_manager.get_network_config().proxy.clone();
                         drop(app_state);
-                        
+
                         let mut proxy_exports: Option<Vec<(String, String)>> = None;
-                        if terminal_proxy_enabled && proxy_config.is_enabled && !proxy_config.host.is_empty() && !proxy_config.port.is_empty() {
-                            let auth = if proxy_config.auth_enabled && !proxy_config.username.is_empty() && !proxy_config.password.is_empty() {
+                        if terminal_proxy_enabled
+                            && proxy_config.is_enabled
+                            && !proxy_config.host.is_empty()
+                            && !proxy_config.port.is_empty()
+                        {
+                            let auth = if proxy_config.auth_enabled
+                                && !proxy_config.username.is_empty()
+                                && !proxy_config.password.is_empty()
+                            {
                                 format!("{}:{}@", proxy_config.username, proxy_config.password)
                             } else {
                                 "".to_string()
                             };
-                            let proxy_url = format!("http://{}{}:{}", auth, proxy_config.host, proxy_config.port);
-                            
+                            let proxy_url = format!(
+                                "http://{}{}:{}",
+                                auth, proxy_config.host, proxy_config.port
+                            );
+
                             let mut exports = Vec::new();
                             exports.push(("HTTP_PROXY".to_string(), proxy_url.clone()));
                             exports.push(("HTTPS_PROXY".to_string(), proxy_url.clone()));
-                            
+
                             if !proxy_config.no_proxy.is_empty() {
-                                exports.push(("NO_PROXY".to_string(), proxy_config.no_proxy.clone()));
+                                exports
+                                    .push(("NO_PROXY".to_string(), proxy_config.no_proxy.clone()));
                             }
                             proxy_exports = Some(exports);
                         }
-                        
-                        let _ = executor.open_distro_terminal(&name, &working_dir, proxy_exports).await;
+
+                        let _ = executor
+                            .open_distro_terminal(&name, &working_dir, proxy_exports)
+                            .await;
                     }
                 }
                 refresh_distros_ui(ah, as_ptr).await;
@@ -119,9 +131,6 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
                     });
                     return;
                 }
-
-
-
                 {
                     let lock_timeout = std::time::Duration::from_millis(500);
                     if let Ok(app_state) = tokio::time::timeout(lock_timeout, as_ptr.lock()).await {
@@ -172,16 +181,15 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
                         let state = as_ptr.lock().await;
                         state.config_manager.get_instance_config(&name).vscode_dir
                     };
-                    
+
                     let _ = executor.open_distro_vscode(&name, &working_dir).await;
                     refresh_distros_ui(ah, as_ptr).await;
 
                     slint::Timer::single_shot(std::time::Duration::from_secs(6), move || {
-                        if let Some(app) = ah_timer.upgrade() {
-                            if app.get_show_vscode_startup() {
+                        if let Some(app) = ah_timer.upgrade()
+                            && app.get_show_vscode_startup() {
                                 app.set_show_vscode_startup(false);
                             }
-                        }
                     });
                 } else {
                     let ext_info = {
@@ -279,8 +287,6 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
                     return;
                 }
 
-
-
                 if let Some(app) = ah.upgrade() {
                     app.set_task_status_text(i18n::t("operation.fetching_info").into());
                     app.set_task_status_visible(true);
@@ -341,11 +347,11 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
                     {
                         let distros = app.get_distros();
                         for i in 0..distros.row_count() {
-                            if let Some(d) = distros.row_data(i) {
-                                if d.name == name {
-                                    is_default = d.is_default;
-                                    break;
-                                }
+                            if let Some(d) = distros.row_data(i)
+                                && d.name == name
+                            {
+                                is_default = d.is_default;
+                                break;
                             }
                         }
                     }
@@ -354,7 +360,7 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
                         let state = as_ptr.lock().await;
                         state.config_manager.get_instance_config(&name)
                     };
-                    
+
                     app.set_settings_distro_name(name.clone().into());
                     app.set_settings_is_default(is_default);
                     app.set_settings_lock_default(is_default);
@@ -385,18 +391,36 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
     {
         let ah_outer = app_handle.clone();
         let as_outer = app_state.clone();
-        app.on_confirm_distro_settings(move |name, terminal_dir, vscode_dir, is_default, autostart, startup_script, terminal_proxy| {
-            let ah = ah_outer.clone();
-            let as_ptr = as_outer.clone();
-            let name = name.to_string();
-            let terminal_dir = terminal_dir.to_string();
-            let vscode_dir = vscode_dir.to_string();
-            let startup_script = startup_script.to_string();
+        app.on_confirm_distro_settings(
+            move |name,
+                  terminal_dir,
+                  vscode_dir,
+                  is_default,
+                  autostart,
+                  startup_script,
+                  terminal_proxy| {
+                let ah = ah_outer.clone();
+                let as_ptr = as_outer.clone();
+                let name = name.to_string();
+                let terminal_dir = terminal_dir.to_string();
+                let vscode_dir = vscode_dir.to_string();
+                let startup_script = startup_script.to_string();
 
-            let _ = slint::spawn_local(async move {
-                super::settings_logic::perform_save_settings(ah, as_ptr, name, terminal_dir, vscode_dir, is_default, autostart, startup_script, terminal_proxy).await;
-            });
-        });
+                let _ = slint::spawn_local(async move {
+                    let ui_context = super::settings_logic::UiContext { ah, as_ptr };
+                    let settings = super::settings_logic::DistroSettings {
+                        name,
+                        terminal_dir,
+                        vscode_dir,
+                        is_default,
+                        autostart,
+                        startup_script,
+                        terminal_proxy,
+                    };
+                    super::settings_logic::perform_save_settings(ui_context, settings).await;
+                });
+            },
+        );
     }
 
     // WSL Config click

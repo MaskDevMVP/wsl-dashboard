@@ -1,5 +1,5 @@
-use std::process::Command;
 use std::os::windows::process::CommandExt;
+use std::process::Command;
 use tracing::info;
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -7,43 +7,60 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 /// Get the IP address of the specified distribution, includes retry logic to wait for network readiness
 pub fn get_distro_ip(distro_name: &str) -> Result<String, String> {
     info!("Fetching IP for distro: {}", distro_name);
-    
+
     let mut last_error = String::new();
     for attempt in 1..=30 {
         if attempt > 1 {
-            info!("Retrying IP fetch for {} (attempt {}/30)...", distro_name, attempt);
+            info!(
+                "Retrying IP fetch for {} (attempt {}/30)...",
+                distro_name, attempt
+            );
             std::thread::sleep(std::time::Duration::from_secs(1));
         }
 
         // Solution 1: hostname -I (Most universal, returns all non-loopback IPv4 directly)
         let output = Command::new("wsl")
             .env("WSL_UTF8", "1")
-            .args(&["-d", distro_name, "--", "hostname", "-I"])
+            .args(["-d", distro_name, "--", "hostname", "-I"])
             .creation_flags(CREATE_NO_WINDOW)
             .output();
 
         match output {
             Ok(out) if out.status.success() => {
-                let stdout = crate::wsl::decoder::decode_output(&out.stdout).trim().to_string();
+                let stdout = crate::wsl::decoder::decode_output(&out.stdout)
+                    .trim()
+                    .to_string();
                 if !stdout.is_empty() {
                     let ips: Vec<&str> = stdout.split_whitespace().collect();
-                    info!("Found candidate IPs for {} (attempt {}): {:?}", distro_name, attempt, ips);
-                    
+                    info!(
+                        "Found candidate IPs for {} (attempt {}): {:?}",
+                        distro_name, attempt, ips
+                    );
+
                     if let Some(wsl_ip) = ips.iter().find(|&&ip| ip.starts_with("172.")) {
-                        info!("Selected WSL default bridge IP: {} for {}", wsl_ip, distro_name);
+                        info!(
+                            "Selected WSL default bridge IP: {} for {}",
+                            wsl_ip, distro_name
+                        );
                         return Ok(wsl_ip.to_string());
                     }
 
                     if let Some(first_ip) = ips.first() {
-                        info!("No 172.x IP found, selected first available: {} for {}", first_ip, distro_name);
+                        info!(
+                            "No 172.x IP found, selected first available: {} for {}",
+                            first_ip, distro_name
+                        );
                         return Ok(first_ip.to_string());
                     }
                 } else {
                     last_error = "hostname -I returned empty result".to_string();
                 }
-            },
+            }
             Ok(out) => {
-                last_error = format!("wsl command exited with error: {}", crate::wsl::decoder::decode_output(&out.stderr).trim());
+                last_error = format!(
+                    "wsl command exited with error: {}",
+                    crate::wsl::decoder::decode_output(&out.stderr).trim()
+                );
             }
             Err(e) => {
                 last_error = format!("Failed to execute wsl: {}", e);
@@ -53,7 +70,7 @@ pub fn get_distro_ip(distro_name: &str) -> Result<String, String> {
         // Solution 2 Fallback: ip -4 addr show
         let output = Command::new("wsl")
             .env("WSL_UTF8", "1")
-            .args(&["-d", distro_name, "--", "ip", "-4", "addr", "show"])
+            .args(["-d", distro_name, "--", "ip", "-4", "addr", "show"])
             .creation_flags(CREATE_NO_WINDOW)
             .output();
 
@@ -68,20 +85,26 @@ pub fn get_distro_ip(distro_name: &str) -> Result<String, String> {
                             let ip_cidr = parts[1];
                             let ip = ip_cidr.split('/').next().unwrap_or(ip_cidr);
                             if ip != "127.0.0.1" {
-                                info!("Found IP via ip addr fallback (attempt {}): {}", attempt, ip);
+                                info!(
+                                    "Found IP via ip addr fallback (attempt {}): {}",
+                                    attempt, ip
+                                );
                                 return Ok(ip.to_string());
                             }
                         }
                     }
                 }
             } else {
-                last_error = format!("ip addr fallback failed: {}", crate::wsl::decoder::decode_output(&out.stderr).trim());
+                last_error = format!(
+                    "ip addr fallback failed: {}",
+                    crate::wsl::decoder::decode_output(&out.stderr).trim()
+                );
             }
         }
     }
 
     Err(format!(
-        "Could not find IPv4 address for {} after 10 attempts. Last error: {}", 
+        "Could not find IPv4 address for {} after 10 attempts. Last error: {}",
         distro_name, last_error
     ))
 }
@@ -90,15 +113,17 @@ pub fn get_distro_ip(distro_name: &str) -> Result<String, String> {
 pub fn is_distro_running(distro_name: &str) -> bool {
     let output = Command::new("wsl")
         .env("WSL_UTF8", "1")
-        .args(&["-l", "-q", "--running"])
+        .args(["-l", "-q", "--running"])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
 
-    if let Ok(out) = output {
-        if out.status.success() {
-            let stdout = crate::wsl::decoder::decode_output(&out.stdout);
-            return stdout.lines().any(|l| l.trim().eq_ignore_ascii_case(distro_name));
-        }
+    if let Ok(out) = output
+        && out.status.success()
+    {
+        let stdout = crate::wsl::decoder::decode_output(&out.stdout);
+        return stdout
+            .lines()
+            .any(|l| l.trim().eq_ignore_ascii_case(distro_name));
     }
     false
 }

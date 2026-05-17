@@ -1,7 +1,7 @@
-use tokio::task;
-use tracing::{info, debug, error};
 use crate::wsl::executor::WslCommandExecutor;
 use crate::wsl::models::{WslCommandResult, WslDistro, WslInformation, WslStatus};
+use tokio::task;
+use tracing::{debug, error, info};
 
 pub async fn list_distros(executor: &WslCommandExecutor) -> WslCommandResult<Vec<WslDistro>> {
     let result = executor.execute_command(&["-l", "-v"]).await;
@@ -24,17 +24,16 @@ pub async fn detect_fastest_source(_executor: &WslCommandExecutor) -> bool {
         // Check https://github.com with 5 seconds timeout
         match ureq::head("https://github.com")
             .timeout(std::time::Duration::from_secs(5))
-            .call() 
+            .call()
         {
-            Ok(response) => {
-                response.status() == 200
-            }
+            Ok(response) => response.status() == 200,
             Err(e) => {
                 debug!("GitHub probe failed: {}", e);
                 false
             }
         }
-    }).await;
+    })
+    .await;
 
     match result {
         Ok(is_accessible) => {
@@ -47,20 +46,31 @@ pub async fn detect_fastest_source(_executor: &WslCommandExecutor) -> bool {
             }
         }
         Err(e) => {
-            error!("Failed to execute network probe: {}. Defaulting to Windows Update.", e);
+            error!(
+                "Failed to execute network probe: {}. Defaulting to Windows Update.",
+                e
+            );
             false
         }
     }
 }
 
-pub async fn get_distro_information(executor: &WslCommandExecutor, distro_name: &str) -> WslCommandResult<WslInformation> {
+pub async fn get_distro_information(
+    executor: &WslCommandExecutor,
+    distro_name: &str,
+) -> WslCommandResult<WslInformation> {
     let distro_name_owned = distro_name.to_string();
-    let mut information = WslInformation::default();
-    information.distro_name = distro_name_owned.clone();
+    let mut information = WslInformation {
+        distro_name: distro_name_owned.clone(),
+        ..Default::default()
+    };
 
     // Use native registry access instead of PowerShell
     let distros_reg = crate::utils::registry::get_wsl_distros_from_reg();
-    if let Some(reg_info) = distros_reg.into_iter().find(|d| d.name == distro_name_owned) {
+    if let Some(reg_info) = distros_reg
+        .into_iter()
+        .find(|d| d.name == distro_name_owned)
+    {
         information.install_location = reg_info.base_path.clone();
         information.wsl_version = format!("WSL{}", reg_info.version);
         information.package_family_name = reg_info.package_family_name;
@@ -84,15 +94,17 @@ pub async fn get_distro_information(executor: &WslCommandExecutor, distro_name: 
             }
 
             // Fallback: search in base path
-            if vhdx_path.is_none() && base_path.exists() {
-                if let Ok(entries) = std::fs::read_dir(&base_path) {
-                    for entry in entries.flatten() {
-                        if let Ok(file_type) = entry.file_type() {
-                            if file_type.is_file() && entry.path().extension().map_or(false, |ext| ext == "vhdx") {
-                                vhdx_path = Some(entry.path());
-                                break;
-                            }
-                        }
+            if vhdx_path.is_none()
+                && base_path.exists()
+                && let Ok(entries) = std::fs::read_dir(&base_path)
+            {
+                for entry in entries.flatten() {
+                    if let Ok(file_type) = entry.file_type()
+                        && file_type.is_file()
+                        && entry.path().extension().is_some_and(|ext| ext == "vhdx")
+                    {
+                        vhdx_path = Some(entry.path());
+                        break;
                     }
                 }
             }
@@ -110,19 +122,22 @@ pub async fn get_distro_information(executor: &WslCommandExecutor, distro_name: 
     // Get running status
     let distros_result = list_distros(executor).await;
     let mut is_running = false;
-    if let Some(distros) = distros_result.data {
-        if let Some(d) = distros.iter().find(|d| d.name == distro_name_owned) {
-            is_running = d.status == WslStatus::Running;
-            information.status = match d.status {
-                WslStatus::Running => "Running",
-                WslStatus::Stopped => "Stopped",
-            }.to_string();
+    if let Some(distros) = distros_result.data
+        && let Some(d) = distros.iter().find(|d| d.name == distro_name_owned)
+    {
+        is_running = d.status == WslStatus::Running;
+        information.status = match d.status {
+            WslStatus::Running => "Running",
+            WslStatus::Stopped => "Stopped",
         }
+        .to_string();
     }
 
     // Get df -B1M / statistics only if running
     if is_running {
-        let df_result = executor.execute_command(&["-d", &distro_name_owned, "--exec", "df", "-B1M", "/"]).await;
+        let df_result = executor
+            .execute_command(&["-d", &distro_name_owned, "--exec", "df", "-B1M", "/"])
+            .await;
         if df_result.success {
             let output = df_result.output.trim();
             if let Some(second_line) = output.lines().nth(1) {
@@ -132,7 +147,7 @@ pub async fn get_distro_information(executor: &WslCommandExecutor, distro_name: 
                         let gb_val = mb_val / 1024.0;
                         information.actual_used = format!("{:.2} GB", gb_val);
                     } else {
-                        information.actual_used = format!("{} MB", parts[2]); 
+                        information.actual_used = format!("{} MB", parts[2]);
                     }
                 } else {
                     information.actual_used = "Parse Error".to_string();
@@ -148,7 +163,9 @@ pub async fn get_distro_information(executor: &WslCommandExecutor, distro_name: 
         let distro_name_for_ip = distro_name_owned.clone();
         if let Ok(Ok(ip)) = task::spawn_blocking(move || {
             crate::network::tracker::get_distro_ip(&distro_name_for_ip)
-        }).await {
+        })
+        .await
+        {
             information.ip = ip;
         }
     } else {
@@ -158,14 +175,20 @@ pub async fn get_distro_information(executor: &WslCommandExecutor, distro_name: 
     WslCommandResult::success(String::new(), Some(information))
 }
 
-pub async fn get_distro_install_location(_executor: &WslCommandExecutor, distro_name: &str) -> WslCommandResult<String> {
+pub async fn get_distro_install_location(
+    _executor: &WslCommandExecutor,
+    distro_name: &str,
+) -> WslCommandResult<String> {
     // Replace minimal PowerShell script with native registry access
     let distros_reg = crate::utils::registry::get_wsl_distros_from_reg();
-    if let Some(reg_info) = distros_reg.into_iter().find(|d| d.name == distro_name) {
-        if !reg_info.base_path.is_empty() {
-            return WslCommandResult::success(String::new(), Some(reg_info.base_path));
-        }
+    if let Some(reg_info) = distros_reg.into_iter().find(|d| d.name == distro_name)
+        && !reg_info.base_path.is_empty()
+    {
+        return WslCommandResult::success(String::new(), Some(reg_info.base_path));
     }
 
-    WslCommandResult::error("".into(), "Failed to find install location in registry".into())
+    WslCommandResult::error(
+        "".into(),
+        "Failed to find install location in registry".into(),
+    )
 }

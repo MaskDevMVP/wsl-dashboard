@@ -1,8 +1,8 @@
+use crate::{AppState, AppWindow, i18n};
+use slint::{ComponentHandle, Model};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
-use slint::{ComponentHandle, Model};
-use crate::{AppWindow, AppState, i18n};
 
 pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc<Mutex<AppState>>) {
     // Open Move Dialog
@@ -46,7 +46,11 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
 
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(app) = ah.upgrade() {
-                    if app.get_is_installing() || app.get_is_exporting() || app.get_is_cloning() || app.get_is_moving() {
+                    if app.get_is_installing()
+                        || app.get_is_exporting()
+                        || app.get_is_cloning()
+                        || app.get_is_moving()
+                    {
                         app.set_current_message(i18n::t("dialog.operation_in_progress").into());
                         app.set_show_message_dialog(true);
                         return;
@@ -105,18 +109,21 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
                 let target_name = app.get_move_target_name().to_string();
                 let target_path = app.get_move_target_path().to_string();
 
-                info!("Operation: Move confirmed - Starting WSL2 Move for {}", source_name);
-                
+                info!(
+                    "Operation: Move confirmed - Starting WSL2 Move for {}",
+                    source_name
+                );
+
                 // Synchronously set moving status
                 app.set_is_moving(true);
 
                 run_move_process(
-                    app.as_weak(), 
-                    as_ptr.clone(), 
-                    source_name, 
-                    target_name, 
-                    target_path, 
-                    "2".to_string()
+                    app.as_weak(),
+                    as_ptr.clone(),
+                    source_name,
+                    target_name,
+                    target_path,
+                    "2".to_string(),
                 );
             }
         });
@@ -127,18 +134,20 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
         if let Some(path) = rfd::FileDialog::new()
             .set_title(i18n::t("dialog.select_move_dir"))
             .pick_folder()
+            && let Some(app) = ah_folder.upgrade()
         {
-            if let Some(app) = ah_folder.upgrade() {
-                app.set_move_target_path(path.to_string_lossy().to_string().into());
-            }
+            app.set_move_target_path(path.to_string_lossy().to_string().into());
         }
     });
 
     let ah_confirm_click = app_handle.clone();
     let as_ptr = app_state.clone();
     app.on_confirm_move(move |source_name, _target_name, target_path| {
-        info!("Operation: Confirm move - Source: {}, Target: {}, Path: {}", source_name, _target_name, target_path);
-        
+        info!(
+            "Operation: Confirm move - Source: {}, Target: {}, Path: {}",
+            source_name, _target_name, target_path
+        );
+
         let ah_weak = ah_confirm_click.clone();
         let as_ptr = as_ptr.clone();
         let source_name = source_name.to_string();
@@ -172,7 +181,11 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
             }
 
             if let Some(app) = ah_weak.upgrade() {
-                if app.get_is_installing() || app.get_is_exporting() || app.get_is_cloning() || app.get_is_moving() {
+                if app.get_is_installing()
+                    || app.get_is_exporting()
+                    || app.get_is_cloning()
+                    || app.get_is_moving()
+                {
                     return;
                 }
 
@@ -180,11 +193,11 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
                 let p = std::path::Path::new(target_path.as_str());
                 if p.exists() {
                     if p.is_dir() {
-                        if let Ok(entries) = std::fs::read_dir(p) {
-                            if entries.count() > 0 {
-                                app.set_move_error(i18n::t("dialog.dir_not_empty").into());
-                                return;
-                            }
+                        if let Ok(entries) = std::fs::read_dir(p)
+                            && entries.count() > 0
+                        {
+                            app.set_move_error(i18n::t("dialog.dir_not_empty").into());
+                            return;
                         }
                     } else {
                         app.set_move_error(i18n::t("dialog.path_is_not_dir").into());
@@ -192,7 +205,9 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
                     }
                 } else {
                     if let Err(e) = std::fs::create_dir_all(p) {
-                        app.set_move_error(i18n::tr("dialog.mkdir_failed", &[e.to_string()]).into());
+                        app.set_move_error(
+                            i18n::tr("dialog.mkdir_failed", &[e.to_string()]).into(),
+                        );
                         return;
                     }
                 }
@@ -201,37 +216,38 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
                 let mut version = "2".to_string();
                 let distros = app.get_distros();
                 for i in 0..distros.row_count() {
-                    if let Some(d) = distros.row_data(i) {
-                        if d.name == source_name {
-                            version = d.version.to_string();
-                            break;
-                        }
+                    if let Some(d) = distros.row_data(i)
+                        && d.name == source_name
+                    {
+                        version = d.version.to_string();
+                        break;
                     }
                 }
 
                 app.set_move_error("".into());
-                
+
                 if version == "2" {
                     // Check if there are other running distros
                     let mut running_names = Vec::new();
                     for i in 0..distros.row_count() {
-                        if let Some(d) = distros.row_data(i) {
-                            if d.status.as_str() == "Running" && d.name != source_name {
-                                running_names.push(d.name.to_string());
-                            }
+                        if let Some(d) = distros.row_data(i)
+                            && d.status.as_str() == "Running"
+                            && d.name != source_name
+                        {
+                            running_names.push(d.name.to_string());
                         }
                     }
-                    
+
                     let warning_msg = if running_names.is_empty() {
                         i18n::t("dialog.move_wsl2_shutdown_warning_no_running")
                     } else {
                         let other_distros = running_names.join(", ");
                         i18n::tr("dialog.move_wsl2_shutdown_warning", &[other_distros])
                     };
-                    
+
                     app.set_move_confirm_message(warning_msg.into());
                     app.set_show_move_confirm(true);
-                    app.set_show_move_dialog(false); 
+                    app.set_show_move_dialog(false);
                 } else {
                     app.set_show_move_dialog(false);
                     app.set_is_moving(true);
@@ -241,7 +257,7 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
                         source_name,
                         target_name,
                         target_path,
-                        version
+                        version,
                     );
                 }
             }
@@ -250,12 +266,19 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
 }
 
 fn run_move_process(
-    ah_move: slint::Weak<AppWindow>, 
-    as_ptr: Arc<Mutex<AppState>>, 
-    source_name: String, 
-    target_name: String, 
-    target_path: String, 
-    version: String
+    ah_move: slint::Weak<AppWindow>,
+    as_ptr: Arc<Mutex<AppState>>,
+    source_name: String,
+    target_name: String,
+    target_path: String,
+    version: String,
 ) {
-    super::move_logic::run_move_process(ah_move, as_ptr, source_name, target_name, target_path, version);
+    super::move_logic::run_move_process(
+        ah_move,
+        as_ptr,
+        source_name,
+        target_name,
+        target_path,
+        version,
+    );
 }

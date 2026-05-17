@@ -1,10 +1,10 @@
-use std::sync::Arc;
-use tokio::sync::Mutex;
-use tracing::{info, error};
+use crate::{AppState, AppWindow, i18n};
 use rand::Rng;
 use rand::distr::Alphanumeric;
 use slint::{ComponentHandle, Model};
-use crate::{AppWindow, AppState, i18n};
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use tracing::{error, info};
 
 pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc<Mutex<AppState>>) {
     // Clone process
@@ -17,7 +17,7 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
             let as_ptr = as_outer.clone();
             let name_str = name.to_string();
 
-            tokio::spawn(async move {
+            std::mem::drop(tokio::spawn(async move {
                 let manager = {
                     let state = as_ptr.lock().await;
                     state.wsl_dashboard.clone()
@@ -60,7 +60,7 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
                             .take(4)
                             .map(char::from)
                             .collect();
-                        
+
                         let target_name = format!("{}_{}", name_str, random_suffix);
                         let distro_location = app.get_distro_location();
                         let target_path = std::path::Path::new(&distro_location.to_string())
@@ -76,7 +76,7 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
                         app.set_show_clone_dialog(true);
                     }
                 });
-            });
+            }));
         });
     }
 
@@ -86,13 +86,12 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
             if let Some(path) = rfd::FileDialog::new()
                 .set_title(i18n::t("dialog.select_clone_dir"))
                 .pick_folder()
+                && let Some(app) = ah_select.upgrade()
             {
-                if let Some(app) = ah_select.upgrade() {
-                    let target_name = app.get_clone_target_name().to_string();
-                    let final_path = path.join(target_name).to_string_lossy().to_string();
-                    app.set_clone_target_path(final_path.into());
-                    app.set_clone_base_path(path.to_string_lossy().to_string().into());
-                }
+                let target_name = app.get_clone_target_name().to_string();
+                let final_path = path.join(target_name).to_string_lossy().to_string();
+                app.set_clone_target_path(final_path.into());
+                app.set_clone_base_path(path.to_string_lossy().to_string().into());
             }
         });
     }
@@ -101,10 +100,13 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
         let ah_outer = app_handle.clone();
         let as_outer = app_state.clone();
         app.on_confirm_clone(move |source_name, target_name, target_path| {
-            info!("Operation: Confirm clone - Source: {}, Target: {}, Path: {}", source_name, target_name, target_path);
+            info!(
+                "Operation: Confirm clone - Source: {}, Target: {}, Path: {}",
+                source_name, target_name, target_path
+            );
             let ah_weak = ah_outer.clone();
             let as_ptr_outer = as_outer.clone();
-            
+
             let _ = slint::spawn_local(async move {
                 let manager = {
                     let state = as_ptr_outer.lock().await;
@@ -135,7 +137,9 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
                     }
 
                     // 2. Validation: ASCII Alphanumeric and -_.
-                    let is_valid_name = target_name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.');
+                    let is_valid_name = target_name
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.');
                     if !is_valid_name {
                         app.set_clone_error(i18n::t("dialog.name_invalid").into());
                         return;
@@ -144,11 +148,11 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
                     // 3. Validation: Instance exists
                     let distros = app.get_distros();
                     for i in 0..distros.row_count() {
-                        if let Some(d) = distros.row_data(i) {
-                            if d.name == target_name {
-                                app.set_clone_error(i18n::t("dialog.name_exists").into());
-                                return;
-                            }
+                        if let Some(d) = distros.row_data(i)
+                            && d.name == target_name
+                        {
+                            app.set_clone_error(i18n::t("dialog.name_exists").into());
+                            return;
                         }
                     }
 
@@ -156,11 +160,11 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
                     let p = std::path::Path::new(target_path.as_str());
                     if p.exists() {
                         if p.is_dir() {
-                            if let Ok(entries) = std::fs::read_dir(p) {
-                                if entries.count() > 0 {
-                                    app.set_clone_error(i18n::t("dialog.dir_not_empty").into());
-                                    return;
-                                }
+                            if let Ok(entries) = std::fs::read_dir(p)
+                                && entries.count() > 0
+                            {
+                                app.set_clone_error(i18n::t("dialog.dir_not_empty").into());
+                                return;
                             }
                         } else {
                             app.set_clone_error(i18n::t("dialog.path_is_not_dir").into());
@@ -168,30 +172,35 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
                         }
                     } else {
                         if let Err(e) = std::fs::create_dir_all(p) {
-                            app.set_clone_error(i18n::tr("dialog.mkdir_failed", &[e.to_string()]).into());
+                            app.set_clone_error(
+                                i18n::tr("dialog.mkdir_failed", &[e.to_string()]).into(),
+                            );
                             return;
                         }
                     }
 
                     app.set_clone_error("".into());
                     app.set_show_clone_dialog(false);
-                    
+
                     app.set_is_cloning(true);
-                    
+
                     let ah_clone = app.as_weak();
                     let as_ptr = as_ptr_outer.clone();
                     let source_name_inner = source_name.to_string();
                     let target_name_inner = target_name.to_string();
                     let target_path_inner = target_path.to_string();
 
-                    let _ = tokio::spawn(async move {
+                    std::mem::drop(tokio::spawn(async move {
                         let manager = {
                             let state = as_ptr.lock().await;
                             state.wsl_dashboard.clone()
                         };
 
                         if let Some(op) = manager.get_active_op(&source_name_inner).await {
-                            let msg = i18n::tr("toast.distro_busy", &[source_name_inner.clone(), op.to_string()]);
+                            let msg = i18n::tr(
+                                "toast.distro_busy",
+                                &[source_name_inner.clone(), op.to_string()],
+                            );
                             let _ = slint::invoke_from_event_loop(move || {
                                 if let Some(app) = ah_clone.upgrade() {
                                     app.set_current_message(msg.into());
@@ -202,8 +211,15 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
                             return;
                         }
 
-                        super::clone_logic::perform_clone(ah_clone, as_ptr, source_name_inner, target_name_inner, target_path_inner).await;
-                    });
+                        super::clone_logic::perform_clone(
+                            ah_clone,
+                            as_ptr,
+                            source_name_inner,
+                            target_name_inner,
+                            target_path_inner,
+                        )
+                        .await;
+                    }));
                 }
             });
         });
@@ -214,10 +230,12 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
         app.on_clone_name_changed(move |new_name| {
             if let Some(app) = ah_name.upgrade() {
                 let base_path = app.get_clone_base_path().to_string();
-                if base_path.is_empty() { return; }
-                
+                if base_path.is_empty() {
+                    return;
+                }
+
                 let new_path = std::path::Path::new(&base_path)
-                    .join(new_name.to_string())
+                    .join(&new_name)
                     .to_string_lossy()
                     .to_string();
                 app.set_clone_target_path(new_path.into());

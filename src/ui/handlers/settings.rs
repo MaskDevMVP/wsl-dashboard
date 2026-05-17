@@ -1,8 +1,8 @@
+use crate::{AppI18n, AppState, AppWindow, Theme, config, i18n};
+use slint::ComponentHandle;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{info, error};
-use slint::ComponentHandle;
-use crate::{AppWindow, AppState, Theme, AppI18n, config, i18n};
+use tracing::{error, info};
 
 pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc<Mutex<AppState>>) {
     let ah = app_handle.clone();
@@ -23,7 +23,7 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
                 let log_days = app.get_log_days() as u8;
                 let check_update = app.get_check_update_interval() as u8;
                 let system_color = app.get_system_color();
-                
+
                 let sidebar_add = app.get_sidebar_add();
                 let sidebar_usb = app.get_sidebar_usb();
                 let sidebar_network = app.get_sidebar_network();
@@ -81,7 +81,7 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
                 app.global::<AppI18n>().set_locale_code(i18n::current_lang().into());
                 app.global::<AppI18n>().set_version(app.global::<AppI18n>().get_version() + 1);
                 crate::ui::data::refresh_localized_strings(&app);
-                
+
                 // Update font based on new language
                 let font_family = if crate::app::is_chinese_lang(lang_to_load) {
                     crate::app::FONT_ZH
@@ -172,10 +172,9 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
         if let Some(path) = rfd::FileDialog::new()
             .set_title(i18n::t("settings.select_distro_dir"))
             .pick_folder()
+            && let Some(app) = ah.upgrade()
         {
-            if let Some(app) = ah.upgrade() {
-                app.set_distro_location(path.display().to_string().into());
-            }
+            app.set_distro_location(path.display().to_string().into());
         }
     });
 
@@ -184,10 +183,9 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
         if let Some(path) = rfd::FileDialog::new()
             .set_title(i18n::t("settings.select_log_dir"))
             .pick_folder()
+            && let Some(app) = ah.upgrade()
         {
-            if let Some(app) = ah.upgrade() {
-                app.set_logs_location(path.display().to_string().into());
-            }
+            app.set_logs_location(path.display().to_string().into());
         }
     });
 
@@ -205,7 +203,10 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
                 if let Err(e) = state.config_manager.update_settings(settings) {
                     error!("Failed to save color mode: {}", e);
                 } else {
-                    info!("Color mode saved: {}", if dark_mode { "Dark" } else { "Light" });
+                    info!(
+                        "Color mode saved: {}",
+                        if dark_mode { "Dark" } else { "Light" }
+                    );
                 }
             }
         });
@@ -225,7 +226,9 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
                 if let Some(app) = app.upgrade() {
                     app.set_current_message(i18n::t("settings.wsl2_required").into());
                     app.set_current_message_link(i18n::t("settings.update_wsl").into());
-                    app.set_current_message_url("https://github.com/microsoft/WSL/releases/latest".into());
+                    app.set_current_message_url(
+                        "https://github.com/microsoft/WSL/releases/latest".into(),
+                    );
                     app.set_show_message_dialog(true);
                 }
             };
@@ -245,13 +248,14 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
 
             if !found {
                 // Try SystemDrive if not C:
-                if let Ok(system_drive) = std::env::var("SystemDrive") {
-                    if system_drive.to_uppercase() != "C:" {
-                        let alt_path = std::path::PathBuf::from(format!("{}\\{}", system_drive, rel_path));
-                        if alt_path.exists() {
-                            exe_path = alt_path;
-                            found = true;
-                        }
+                if let Ok(system_drive) = std::env::var("SystemDrive")
+                    && system_drive.to_uppercase() != "C:"
+                {
+                    let alt_path =
+                        std::path::PathBuf::from(format!("{}\\{}", system_drive, rel_path));
+                    if alt_path.exists() {
+                        exe_path = alt_path;
+                        found = true;
                     }
                 }
             }

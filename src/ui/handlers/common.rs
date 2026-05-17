@@ -1,6 +1,6 @@
+use crate::{AppState, AppWindow};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use crate::{AppWindow, AppState};
 use tracing::debug;
 
 pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc<Mutex<AppState>>) {
@@ -22,17 +22,21 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
 
                     if let Some(app) = ah.upgrade() {
                         app.set_distro_location(location.clone().into());
-                        
+
                         let current_name = app.get_new_instance_name().to_string();
                         let final_path = if !current_name.is_empty() {
-                            std::path::Path::new(&location).join(&current_name).to_string_lossy().to_string()
+                            std::path::Path::new(&location)
+                                .join(&current_name)
+                                .to_string_lossy()
+                                .to_string()
                         } else {
                             location
                         };
 
                         app.set_new_instance_path(final_path.into());
                     }
-                }).unwrap();
+                })
+                .unwrap();
             }
 
             // Tab 2 is "USB Devices"
