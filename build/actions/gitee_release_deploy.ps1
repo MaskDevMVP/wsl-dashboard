@@ -21,6 +21,7 @@ $GetUrl = "$ApiBase/repos/$RepoOwner/$RepoName/releases/tags/$Tag?access_token=$
 try {
     Write-Host "`n[INFO] Checking if Gitee Release $Tag exists..."
     $Response = Invoke-RestMethod -Uri $GetUrl -Method Get -ErrorAction Stop
+    Write-Host "[DEBUG] Release Response: $($Response | ConvertTo-Json -Depth 3)"
     $ReleaseId = $Response.id
     Write-Host "[OK] Release exists. ID: $ReleaseId"
 } catch {
@@ -33,9 +34,10 @@ try {
         body = "Auto-synced from GitHub Release $Tag"
         target_commitish = "main"
     }
-    
+
     try {
         $Response = Invoke-RestMethod -Uri $PostUrl -Method Post -Body $Body -ErrorAction Stop
+        Write-Host "[DEBUG] Created Release Response: $($Response | ConvertTo-Json -Depth 3)"
         $ReleaseId = $Response.id
         Write-Host "[OK] Created new release. ID: $ReleaseId"
     } catch {
@@ -45,7 +47,7 @@ try {
 }
 
 # 2. Upload Assets
-$UploadUrl = "$ApiBase/repos/$RepoOwner/$RepoName/releases/$ReleaseId/assets?access_token=$GiteeToken"
+$UploadUrl = "$ApiBase/repos/$RepoOwner/$RepoName/releases/$ReleaseId/attach_files?access_token=$GiteeToken"
 
 $filesToUpload = @(
     "WSLDashboard.$Version.Portable.x64.zip",
@@ -62,14 +64,10 @@ foreach ($fileName in $filesToUpload) {
     }
 
     Write-Host "[INFO] Uploading $fileName to Gitee..."
-    
-    # Using multipart/form-data via Invoke-RestMethod (Supported in PS 6.1+)
-    $Form = @{
-        file = Get-Item -Path $filePath
-    }
-    
+    Write-Host "[DEBUG] Upload URL: ${UploadUrl}&name=$fileName"
+
     try {
-        $Response = Invoke-RestMethod -Uri $UploadUrl -Method Post -Form $Form -ErrorAction Stop
+        $Response = Invoke-RestMethod -Uri "${UploadUrl}&name=$fileName" -Method Post -Form @{ file = Get-Item -Path $filePath } -ErrorAction Stop
         Write-Host "[OK] Successfully uploaded $fileName"
     } catch {
         Write-Error "[ERROR] Failed to upload $($fileName): $_"
